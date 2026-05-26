@@ -1,5 +1,5 @@
 {
-  "name": "@thetab/agent-sdk",
+  "name": "@tabdotbar/agent-sdk",
   "version": "0.1.0",
   "description": "Tab payment rail for autonomous agents. Tool schemas for OpenAI, Anthropic, and MCP.",
   "license": "MIT",

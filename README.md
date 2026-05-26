@@ -10,7 +10,7 @@ This repository is the public surface of Tab: smart contracts, SDK, and MCP serv
 
 | Path | What |
 |---|---|
-| [`sdk/`](./sdk) | `@thetab/agent-sdk` — TypeScript SDK with OpenAI/Anthropic tool schemas + MCP server for Claude Desktop / Cursor |
+| [`sdk/`](./sdk) | `@tabdotbar/agent-sdk` — TypeScript SDK with OpenAI/Anthropic tool schemas + MCP server for Claude Desktop / Cursor |
 | [`contracts/evm/`](./contracts/evm) | Solidity routers deployed on Base, BSC, Celo, Ink. Same address every chain. |
 | [`contracts/solana/`](./contracts/solana) | Anchor programs deployed on Solana mainnet-beta. |
 

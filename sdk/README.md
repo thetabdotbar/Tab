@@ -1,15 +1,15 @@
-# @thetab/agent-sdk
+# @tabdotbar/agent-sdk
 
 A TypeScript SDK that turns Tab into a payment rail an autonomous agent can use safely. Ships with tool schemas for OpenAI, Anthropic, and MCP, plus a verifier for Tab's signed payment receipts.
 
 ```bash
-npm install @thetab/agent-sdk viem
+npm install @tabdotbar/agent-sdk viem
 ```
 
 ## Core client
 
 ```ts
-import { Tab } from "@thetab/agent-sdk";
+import { Tab } from "@tabdotbar/agent-sdk";
 
 const tab = new Tab({
   apiKey: process.env.TAB_API_KEY!,    // sk_live_... or sk_test_...
@@ -35,8 +35,8 @@ const settled = await tab.orders.waitForSettlement(order.id, {
 
 ```ts
 import OpenAI from "openai";
-import { Tab } from "@thetab/agent-sdk";
-import { tabTools, runTool } from "@thetab/agent-sdk/openai";
+import { Tab } from "@tabdotbar/agent-sdk";
+import { tabTools, runTool } from "@tabdotbar/agent-sdk/openai";
 
 const openai = new OpenAI();
 const tab = new Tab({ apiKey: process.env.TAB_API_KEY!, baseUrl: process.env.TAB_BASE_URL! });
@@ -62,8 +62,8 @@ for (const call of completion.choices[0].message.tool_calls ?? []) {
 
 ```ts
 import Anthropic from "@anthropic-ai/sdk";
-import { Tab } from "@thetab/agent-sdk";
-import { tabTools, runTool } from "@thetab/agent-sdk/anthropic";
+import { Tab } from "@tabdotbar/agent-sdk";
+import { tabTools, runTool } from "@tabdotbar/agent-sdk/anthropic";
 
 const anthropic = new Anthropic();
 const tab = new Tab({ apiKey: process.env.TAB_API_KEY!, baseUrl: process.env.TAB_BASE_URL! });
@@ -94,7 +94,7 @@ Add this to `claude_desktop_config.json` (or your client's equivalent):
   "mcpServers": {
     "tab": {
       "command": "npx",
-      "args": ["-y", "@thetab/agent-sdk"],
+      "args": ["-y", "@tabdotbar/agent-sdk"],
       "env": {
         "TAB_API_KEY": "sk_live_...",
         "TAB_BASE_URL": "https://tab.yourdomain.com"
@@ -111,8 +111,8 @@ The MCP server exposes the same tools as the OpenAI/Anthropic variants. Your cli
 When a merchant settles a payment in Tab, they can sign a receipt with their own wallet. The signed JSON is verifiable by anyone who independently knows the merchant's wallet address — usually obtained by resolving the merchant's handle.
 
 ```ts
-import { Tab } from "@thetab/agent-sdk";
-import { verifyReceipt, type SignedReceipt } from "@thetab/agent-sdk/receipts";
+import { Tab } from "@tabdotbar/agent-sdk";
+import { verifyReceipt, type SignedReceipt } from "@tabdotbar/agent-sdk/receipts";
 
 const tab = new Tab({ apiKey: process.env.TAB_API_KEY!, baseUrl: process.env.TAB_BASE_URL! });
 
@@ -191,7 +191,7 @@ Three properties of Tab make it the right rail for autonomous spenders:
 Direct SDK calls throw `TabApiError` on non-2xx responses (or on non-JSON 5xx bodies — those get a synthetic `non_json_response` error code so you don't get a raw `SyntaxError`):
 
 ```ts
-import { Tab, TabApiError } from "@thetab/agent-sdk";
+import { Tab, TabApiError } from "@tabdotbar/agent-sdk";
 
 try {
   await tab.orders.create({ ... });
@@ -203,7 +203,7 @@ try {
 }
 ```
 
-The `runTool` helpers (`@thetab/agent-sdk/openai`, `@thetab/agent-sdk/anthropic`) never throw — they return `{ ok: false, error }` instead. That's the right shape for feeding back to a model.
+The `runTool` helpers (`@tabdotbar/agent-sdk/openai`, `@tabdotbar/agent-sdk/anthropic`) never throw — they return `{ ok: false, error }` instead. That's the right shape for feeding back to a model.
 
 ## License
 
