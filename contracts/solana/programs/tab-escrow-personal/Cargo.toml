@@ -1,0 +1,21 @@
+[package]
+name = "tab-escrow-personal"
+version = "0.1.0"
+description = "Tab personal-tier escrow program on Solana — 0%-fee variant of tab-escrow dedicated to bot-relayed P2P tips. Mirrors the EVM Personal Escrow Router."
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "tab_escrow_personal"
+
+[features]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+cpi = ["no-entrypoint"]
+default = []
+idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
+
+[dependencies]
+anchor-lang = { version = "0.30.1", features = ["init-if-needed"] }
+anchor-spl = "0.30.1"

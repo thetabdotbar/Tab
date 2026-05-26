@@ -1,0 +1,47 @@
+node_modules/
+**/node_modules/
+
+# build outputs
+dist/
+**/dist/
+out/
+**/out/
+target/
+**/target/
+cache/
+**/cache/
+
+# foundry
+broadcast/
+**/broadcast/
+
+# env / secrets
+.env
+.env.*
+*.key
+*.pem
+*-keypair.json
+id.json
+deployer*.json
+relayer*.json
+executor*.json
+
+# logs
+*.log
+npm-debug.log*
+
+# os
+.DS_Store
+Thumbs.db
+
+# editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# archives
+*.rar
+*.zip
+*.tar.gz
+*.tgz

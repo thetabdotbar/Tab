@@ -1,0 +1,61 @@
+{
+  "name": "@thetab/agent-sdk",
+  "version": "0.1.0",
+  "description": "Tab payment rail for autonomous agents. Tool schemas for OpenAI, Anthropic, and MCP.",
+  "license": "MIT",
+  "homepage": "https://thetab.bar/docs/agents/base-mcp",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js",
+    "./openai": "./dist/openai.js",
+    "./anthropic": "./dist/anthropic.js",
+    "./mcp": "./dist/mcp.js",
+    "./receipts": "./dist/receipts.js"
+  },
+  "bin": {
+    "tab-mcp": "./dist/mcp-server.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build",
+    "mcp:serve": "tsx src/mcp-server.ts"
+  },
+  "dependencies": {
+    "viem": "^2.21.0",
+    "@modelcontextprotocol/sdk": "^1.0.4"
+  },
+  "peerDependencies": {
+    "@solana/web3.js": "^1.95.0"
+  },
+  "peerDependenciesMeta": {
+    "@solana/web3.js": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "tsx": "^4.19.0",
+    "@types/node": "^20.14.0"
+  },
+  "keywords": [
+    "tab",
+    "stablecoin",
+    "payments",
+    "x402",
+    "erc-8004",
+    "mcp",
+    "model-context-protocol",
+    "agents",
+    "ai"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}
