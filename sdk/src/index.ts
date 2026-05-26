@@ -1,8 +1,25 @@
 // Core Tab API client for agents.
 //
-//   import { Tab } from "@tab/agent-sdk";
+//   import { Tab } from "@tabdotbar/agent-sdk";
 //   const tab = new Tab({ apiKey: process.env.TAB_KEY!, baseUrl: "https://tab.example" });
 //   await tab.orders.create({ amount: "5.00", chain: "base", recipient: "@alice" });
+
+import {
+  ERC8004_IDENTITY_REGISTRY,
+  ERC8004_REPUTATION_REGISTRY,
+  IDENTITY_REGISTRY_ABI,
+  REPUTATION_REGISTRY_ABI,
+  makeReadClient,
+  feedbackValueToNumber,
+  type OnChainReadOptions,
+} from "./erc8004.js";
+
+export {
+  ERC8004_IDENTITY_REGISTRY,
+  ERC8004_REPUTATION_REGISTRY,
+  type OnChainReadOptions,
+  type Erc8004Chain,
+} from "./erc8004.js";
 
 export type EvmChain =
   | "base"
@@ -757,6 +774,130 @@ export class AgentsResource {
     if (opts.cursor != null) params.push(`cursor=${opts.cursor}`);
     const qs = params.length ? `?${params.join("&")}` : "";
     return this.tab.request("GET", `/api/agent-registry/public${qs}`, { auth: false });
+  }
+
+  /** Resolve a Tab @handle to its ERC-8004 agentId. Handles aren't
+   *  on-chain (only agentIds are), so this hop hits Tab's registry
+   *  index. Pair with the *OnChain helpers below to verify everything
+   *  else directly against the contract. */
+  async resolveAgentId(
+    handle: string,
+    opts: { chain?: "base" | "bsc" | "celo" } = {}
+  ): Promise<{ agentId: string; chain: string; owner: string }> {
+    const clean = handle.replace(/^@/, "");
+    const qs = opts.chain ? `?chain=${encodeURIComponent(opts.chain)}` : "";
+    return this.tab.request(
+      "GET",
+      `/api/agent-registry/resolve/${encodeURIComponent(clean)}${qs}`,
+      { auth: false }
+    );
+  }
+
+  /** Read an agent's manifest directly from the ERC-8004 Identity
+   *  Registry — no Tab backend involved. Fetches the tokenURI from the
+   *  registry on `chain` (default "base"), then GETs the JSON it points
+   *  to. Use this when you need to verify what an agent actually
+   *  published on-chain, not what Tab's cache returned. */
+  async manifestOnChain(
+    agentId: bigint | string,
+    opts: OnChainReadOptions = {}
+  ): Promise<AgentManifest> {
+    const client = makeReadClient(opts);
+    const id = typeof agentId === "string" ? BigInt(agentId) : agentId;
+    const uri = (await client.readContract({
+      address: ERC8004_IDENTITY_REGISTRY,
+      abi: IDENTITY_REGISTRY_ABI,
+      functionName: "tokenURI",
+      args: [id],
+    })) as string;
+    const res = await fetch(uri);
+    if (!res.ok) {
+      throw new Error(
+        `manifestOnChain: tokenURI fetch failed (${res.status}) for ${uri}`
+      );
+    }
+    return (await res.json()) as AgentManifest;
+  }
+
+  /** Read the owning wallet of an agent directly from the registry.
+   *  This is the address allowed to update the agent's tokenURI — the
+   *  signer of any "this agent says X" claim should be this address. */
+  async ownerOnChain(
+    agentId: bigint | string,
+    opts: OnChainReadOptions = {}
+  ): Promise<`0x${string}`> {
+    const client = makeReadClient(opts);
+    const id = typeof agentId === "string" ? BigInt(agentId) : agentId;
+    return (await client.readContract({
+      address: ERC8004_IDENTITY_REGISTRY,
+      abi: IDENTITY_REGISTRY_ABI,
+      functionName: "ownerOf",
+      args: [id],
+    })) as `0x${string}`;
+  }
+
+  /** Read the agent's wallet (the address that receives payments) from
+   *  the registry. May or may not equal `ownerOnChain` depending on the
+   *  agent's setup. */
+  async walletOnChain(
+    agentId: bigint | string,
+    opts: OnChainReadOptions = {}
+  ): Promise<`0x${string}`> {
+    const client = makeReadClient(opts);
+    const id = typeof agentId === "string" ? BigInt(agentId) : agentId;
+    return (await client.readContract({
+      address: ERC8004_IDENTITY_REGISTRY,
+      abi: IDENTITY_REGISTRY_ABI,
+      functionName: "getAgentWallet",
+      args: [id],
+    })) as `0x${string}`;
+  }
+
+  /** Read the on-chain reputation summary for an agent directly from
+   *  the ERC-8004 Reputation Registry. Returns the feedback count and
+   *  the aggregated summary value (normalised via the registry's
+   *  (value, decimals) pair encoding). */
+  async reputationOnChain(
+    agentId: bigint | string,
+    opts: OnChainReadOptions & {
+      /** Filter by a specific tag1 (e.g. "payment", "validation"). */
+      tag1?: string;
+      /** Filter by a specific tag2. */
+      tag2?: string;
+    } = {}
+  ): Promise<{
+    count: number;
+    summaryValue: number;
+    rawValue: bigint;
+    decimals: number;
+    clients: `0x${string}`[];
+  }> {
+    const client = makeReadClient(opts);
+    const id = typeof agentId === "string" ? BigInt(agentId) : agentId;
+    const tag1 = opts.tag1 ?? "";
+    const tag2 = opts.tag2 ?? "";
+    const [clients, summary] = await Promise.all([
+      client.readContract({
+        address: ERC8004_REPUTATION_REGISTRY,
+        abi: REPUTATION_REGISTRY_ABI,
+        functionName: "getClients",
+        args: [id],
+      }) as Promise<readonly `0x${string}`[]>,
+      client.readContract({
+        address: ERC8004_REPUTATION_REGISTRY,
+        abi: REPUTATION_REGISTRY_ABI,
+        functionName: "getSummary",
+        args: [id, [], tag1, tag2],
+      }) as Promise<readonly [bigint, bigint, number]>,
+    ]);
+    const [count, summaryValue, decimals] = summary;
+    return {
+      count: Number(count),
+      summaryValue: feedbackValueToNumber(summaryValue, decimals),
+      rawValue: summaryValue,
+      decimals,
+      clients: [...clients],
+    };
   }
 }
 

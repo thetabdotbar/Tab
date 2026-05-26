@@ -6,7 +6,7 @@
 //     "mcpServers": {
 //       "tab": {
 //         "command": "npx",
-//         "args": ["-y", "@tab/agent-sdk", "mcp"],
+//         "args": ["-y", "@tabdotbar/agent-sdk"],
 //         "env": { "TAB_API_KEY": "sk_live_..." }
 //       }
 //     }

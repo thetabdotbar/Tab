@@ -1,6 +1,6 @@
 {
   "name": "@tabdotbar/agent-sdk",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Tab payment rail for autonomous agents. Tool schemas for OpenAI, Anthropic, and MCP.",
   "license": "MIT",
   "homepage": "https://thetab.bar/docs/agents/base-mcp",

@@ -106,6 +106,37 @@ Add this to `claude_desktop_config.json` (or your client's equivalent):
 
 The MCP server exposes the same tools as the OpenAI/Anthropic variants. Your client picks them up automatically.
 
+## ERC-8004 — direct on-chain reads
+
+The agent-discovery tools (`agents.manifest`, `agents.reputation`,
+`agents.list`) hit Tab's REST cache by default — fast, handle-aware,
+no RPC bandwidth. When you need to *verify* what an agent really
+published, skip Tab and read the canonical ERC-8004 registries
+directly:
+
+```ts
+import { Tab } from "@tabdotbar/agent-sdk";
+
+const tab = new Tab({ apiKey: process.env.TAB_API_KEY!, baseUrl: process.env.TAB_BASE_URL! });
+
+// Step 1 — handle → agentId (Tab's index; handles aren't on-chain).
+const { agentId } = await tab.agents.resolveAgentId("@alice");
+
+// Step 2 — everything below talks to the ERC-8004 contract directly.
+const manifest = await tab.agents.manifestOnChain(agentId, { chain: "base" });
+const owner    = await tab.agents.ownerOnChain(agentId,    { chain: "base" });
+const wallet   = await tab.agents.walletOnChain(agentId,   { chain: "base" });
+const rep      = await tab.agents.reputationOnChain(agentId, { chain: "base" });
+
+console.log(`@alice published`, manifest);
+console.log(`owner ${owner}, wallet ${wallet}, ${rep.count} feedback entries, summary ${rep.summaryValue}`);
+```
+
+The same registry address (`0x8004A169FB4a3325136EB29fA0ceB6D2e539a432`)
+is deployed on Base, BSC, and Celo — pick whichever chain the agent
+registered on. By default the SDK hits the chain's public RPC; pass
+`rpcUrl` to use a paid endpoint for production traffic.
+
 ## Signed payment receipts
 
 When a merchant settles a payment in Tab, they can sign a receipt with their own wallet. The signed JSON is verifiable by anyone who independently knows the merchant's wallet address — usually obtained by resolving the merchant's handle.

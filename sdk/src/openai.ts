@@ -1,7 +1,7 @@
 // OpenAI function-calling tool schemas for Tab.
 //
-//   import { Tab } from "@tab/agent-sdk";
-//   import { tabTools, runTool } from "@tab/agent-sdk/openai";
+//   import { Tab } from "@tabdotbar/agent-sdk";
+//   import { tabTools, runTool } from "@tabdotbar/agent-sdk/openai";
 //
 //   const tab = new Tab({ apiKey });
 //   const completion = await openai.chat.completions.create({
