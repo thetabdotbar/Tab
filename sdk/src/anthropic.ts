@@ -113,13 +113,19 @@ export const tabTools = [
   {
     name: "tab_pay_smart",
     description:
-      "Pay $X USD to a Tab handle or 0x address. Tab picks the cheapest source asset across all your chains and executes gaslessly via your 7702 delegation. Use this instead of tab_create_payment when you don't care which chain/asset funds it. Requires gasless tipping enabled at thetab.bar/dashboard/tabbot.",
+      "Pay any supported asset (USDC/ETH/BNB/CELO) to a Tab handle or address. Tab picks the cheapest source from the payer's full balance and executes gaslessly via their 7702 delegation. amount='5' (defaults to USDC) → alice gets 5 USDC; amount='0.2' recipientAsset='BNB' → bob gets 0.2 BNB. Requires gasless tipping enabled at thetab.bar/dashboard/tabbot.",
     input_schema: {
       type: "object" as const,
       properties: {
-        amountUsd: {
+        amount: {
           type: "string",
-          description: "USD amount as decimal string, e.g. '4.20'.",
+          description:
+            "Amount in recipient asset's natural units. '5' for 5 USDC, '0.2' for 0.2 BNB.",
+        },
+        recipientAsset: {
+          type: "string",
+          enum: ["USDC", "ETH", "BNB", "CELO"],
+          description: "Asset the recipient receives. Defaults to USDC.",
         },
         recipient: {
           type: "string",
@@ -128,14 +134,21 @@ export const tabTools = [
         recipientChain: {
           type: "string",
           enum: ["base", "bsc", "ink", "celo"],
-          description: "Settle USDC on this chain. Defaults to 'base'.",
+          description:
+            "Settle on this chain. Defaults sensibly per recipientAsset.",
         },
         slippageCap: {
           type: "number",
           description: "Max acceptable slippage (0.01 = 1%). Default 0.01.",
         },
+        mode: {
+          type: "string",
+          enum: ["tip", "pos"],
+          description:
+            "'tip' = sender pays exact (recipient gets less on cross-chain). 'pos' = recipient gets exact (preview UX in roadmap).",
+        },
       },
-      required: ["amountUsd", "recipient"],
+      required: ["amount", "recipient"],
     },
   },
   {
@@ -244,19 +257,32 @@ export async function runTool(
         return { ok: true, value };
       }
       case "tab_pay_smart": {
-        const a = requireString(input, "amountUsd");
-        if (!a.ok) return a;
+        const amount =
+          typeof input.amount === "string"
+            ? input.amount
+            : typeof input.amountUsd === "string"
+              ? input.amountUsd
+              : null;
+        if (!amount) return fail("invalid_argument", "Missing field 'amount'");
         const r = requireString(input, "recipient");
         if (!r.ok) return r;
         const value = await tab.pay.smart({
-          amountUsd: a.value,
+          amount,
           recipient: r.value,
+          recipientAsset:
+            typeof input.recipientAsset === "string"
+              ? (input.recipientAsset as "USDC" | "ETH" | "BNB" | "CELO")
+              : undefined,
           recipientChain:
             typeof input.recipientChain === "string"
               ? (input.recipientChain as "base" | "bsc" | "ink" | "celo")
               : undefined,
           slippageCap:
             typeof input.slippageCap === "number" ? input.slippageCap : undefined,
+          mode:
+            typeof input.mode === "string"
+              ? (input.mode as "tip" | "pos")
+              : undefined,
         });
         return { ok: true, value };
       }

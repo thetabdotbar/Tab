@@ -1,6 +1,6 @@
 {
   "name": "@tabdotbar/agent-sdk",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Tab payment rail for autonomous agents. Smart Pay (one $X call, any asset/chain), 7702 gasless tipping, x402, ERC-8004. Tool schemas for OpenAI, Anthropic, and MCP.",
   "license": "MIT",
   "homepage": "https://thetab.bar/docs/agents/base-mcp",

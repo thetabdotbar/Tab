@@ -19,15 +19,31 @@ const tab = new Tab({
 
 ## Smart Pay (recommended)
 
-One call, any asset, any chain. The server picks the cheapest source across every chain you hold balance on, then executes gaslessly via your EIP-7702 delegation. Direct path (USDC already on dest chain) lands in ~3s; cross-asset (e.g. ETH → USDC bridge) ~20-30s.
+One call, any asset, any chain. The server picks the cheapest source across every chain you hold balance on, then executes gaslessly via your EIP-7702 delegation. Direct path (you hold the target asset on the target chain) lands in ~3s with zero fee; cross-asset/cross-chain via relay.link is ~20-30s with a small bridge fee.
 
 ```ts
-// Pay $20 to @alice — Tab picks whatever source covers it cheapest
+// Pay 20 USDC to @alice — Tab picks whatever source covers it cheapest
 const result = await tab.pay.smart({
-  amountUsd: "20.00",
+  amount: "20",
   recipient: "@alice",            // handle or 0x address
-  recipientChain: "base",         // optional, default "base"
-  slippageCap: 0.01,              // optional, default 1%
+  // recipientAsset defaults to "USDC"
+  // recipientChain defaults to "base"
+});
+
+// Tip a friend 0.2 BNB — recipient gets BNB on BSC, source could be
+// your USDC on Base or any other asset
+await tab.pay.smart({
+  amount: "0.2",
+  recipientAsset: "BNB",
+  recipient: "@bob",
+});
+
+// Pay 0.05 ETH to a vendor on Ink
+await tab.pay.smart({
+  amount: "0.05",
+  recipientAsset: "ETH",
+  recipientChain: "ink",
+  recipient: "@vendor",
 });
 
 if (result.kind === "direct") {
@@ -36,9 +52,28 @@ if (result.kind === "direct") {
   console.log("Pull tx:", result.pullTxHash);
   console.log("Source swap:", result.sourceTxHash);
 }
+
+// Every response includes fee transparency. Direct (same-chain) is
+// always zero fee. Cross-chain incurs ~$0.05-0.40 depending on amount.
+console.log(`Sent $${result.senderPaysUsd} → recipient got $${result.recipientAmountUsd} (fee $${result.feeUsd})`);
 ```
 
 Requires the payer wallet to have [gasless tipping enabled](https://thetab.bar/dashboard/tabbot) (one EIP-7702 signature). After that, every Smart Pay call is fully gasless.
+
+### Fee model
+
+- **Same-chain payment** (recipient's chain matches what you hold): **zero fee**. Sender and recipient see the same amount.
+- **Cross-chain payment**: the bridge / swap fee comes from relay.link (~$0.05-0.10 flat on USDC↔USDC bridges, 0.5-2% on asset swaps).
+  - **`mode: "tip"`** (default): sender pays exactly `amountUsd`. Recipient receives `amountUsd - feeUsd`. Same model Cashapp/Venmo use for international transfers. The receipt shows the breakdown.
+  - **`mode: "pos"`** (for bills / merchant POS where recipient must receive an exact amount): sender pays `amountUsd + feeUsd`. Pre-confirm preview UX is on the roadmap — for now agents should sum `senderPaysUsd` and verify before calling.
+
+```ts
+// "Tip mode" — default. Sender pays $10. Alice gets ~$9.94 cross-chain.
+await tab.pay.smart({ amountUsd: "10.00", recipient: "@alice" });
+
+// "POS mode" — alice must receive exactly $10. Sender pays $10.06.
+await tab.pay.smart({ amountUsd: "10.00", recipient: "@alice", mode: "pos" });
+```
 
 ### Aggregate balance + spot prices
 

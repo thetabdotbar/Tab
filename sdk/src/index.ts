@@ -960,19 +960,27 @@ export class X402Resource {
   }
 }
 
-/* ---------- Smart Pay ---------- */
+/* ---------- Smart Pay (asset-aware) ---------- */
+
+export type SmartPayAsset = "USDC" | "ETH" | "BNB" | "CELO";
 
 export type SmartPayParams = {
-  /** USD amount as a decimal string ("4.20"). */
-  amountUsd: string;
-  /** EVM 0x address OR @handle the caller has already resolved. The
-   *  endpoint also accepts a handle — pass `recipientHandle` instead
-   *  if you don't have the address yet. */
+  /** Amount in the recipient asset's natural units. "5" for 5 USDC,
+   *  "0.2" for 0.2 BNB, "0.05" for 0.05 ETH. */
+  amount: string;
+  /** What the recipient receives. Defaults to USDC. */
+  recipientAsset?: SmartPayAsset;
+  /** EVM 0x address OR Tab @handle. The endpoint resolves handles
+   *  server-side. */
   recipient: string;
-  /** Settle USDC on this chain. Defaults to "base". */
+  /** Settle on this chain. Defaults sensibly per recipientAsset —
+   *  base for USDC/ETH, bsc for BNB, celo for CELO. */
   recipientChain?: "base" | "bsc" | "ink" | "celo";
   /** Max acceptable slippage as a fraction (0.01 = 1%). Default 0.01. */
   slippageCap?: number;
+  /** "tip" (default): sender pays exact, recipient gets less on
+   *  cross-chain. "pos": recipient gets exact (preview UX in roadmap). */
+  mode?: "tip" | "pos";
 };
 
 export type SmartPayResult =
@@ -980,11 +988,18 @@ export type SmartPayResult =
       ok: true;
       kind: "direct";
       txHash: string;
-      route: {
-        kind: "direct";
-        chain: string;
-        expectedOutUsd: number;
-      };
+      // Asset-aware breakdown (also surfaced for direct routes for
+      // uniform receipt rendering — fee is zero in this case).
+      recipientAmount: string;
+      recipientAsset: SmartPayAsset;
+      recipientChain: string;
+      senderPaysAmount: string;
+      senderPaysAsset: string;
+      senderPaysChain: string;
+      feeAmount: string;
+      recipientAmountUsd: number;
+      senderPaysUsd: number;
+      feeUsd: number;
     }
   | {
       ok: true;
@@ -993,21 +1008,42 @@ export type SmartPayResult =
       sourceTxHash: string;
       sourceChain: string;
       destinationChain: string;
-      expectedOutUsd: number;
+      recipientAmount: string;
+      recipientAsset: SmartPayAsset;
+      recipientChain: string;
+      senderPaysAmount: string;
+      senderPaysAsset: string;
+      senderPaysChain: string;
+      feeAmount: string;
+      recipientAmountUsd: number;
+      senderPaysUsd: number;
+      feeUsd: number;
     };
 
 export class PayResource {
   constructor(private readonly tab: Tab) {}
 
-  /** Pay an arbitrary USD amount to a Tab handle. The server picks
-   *  the cheapest source asset across all your chains, executes
-   *  gaslessly via your 7702 delegation, and lands USDC at the
-   *  recipient.
+  /** Pay an amount of any supported asset to a Tab handle. The server
+   *  picks the cheapest source from your full balance, executes
+   *  gaslessly via your 7702 delegation, and delivers `recipientAsset`
+   *  to the recipient.
    *
-   *  Direct path (USDC already on dest chain): single tx, ~3s.
-   *  Cross-asset path (e.g. ETH → USDC via relay.link): pull-then-
-   *  swap, ~20-30s. Server-side simulation rejects the route if
-   *  expected output is below `amountUsd × (1 - slippageCap)`. */
+   *  Examples:
+   *    tab.pay.smart({ amount: "5", recipient: "@alice" })
+   *      → alice gets 5 USDC on Base (default).
+   *
+   *    tab.pay.smart({ amount: "0.2", recipientAsset: "BNB", recipient: "@bob" })
+   *      → bob gets 0.2 BNB on BSC. Source picked from your portfolio.
+   *
+   *  Direct path (you hold the target asset on the target chain):
+   *  ~3s, zero fee, sender + recipient see identical amounts.
+   *
+   *  Relay path (cross-asset or cross-chain): pull-then-swap via
+   *  relay.link, ~20-30s. In "tip" mode (default), the bridge fee
+   *  comes out of what the recipient receives — sender pays exactly
+   *  `amount`, recipient receives `amount - feeAmount`. Use "pos"
+   *  mode when the recipient must receive exact (e.g. merchant bill;
+   *  pre-confirm preview UX is on the roadmap). */
   async smart(params: SmartPayParams): Promise<SmartPayResult> {
     return this.tab.request("POST", "/api/pay/smart", { body: params });
   }

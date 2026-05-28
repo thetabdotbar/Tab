@@ -134,13 +134,19 @@ export const tabTools = [
     function: {
       name: "tab_pay_smart",
       description:
-        "Pay $X USD to a Tab handle or 0x address. Tab picks the cheapest source asset across all your chains and executes gaslessly via your 7702 delegation. Use this instead of tab_create_payment when you don't care which chain/asset funds the payment. Requires gasless tipping enabled at thetab.bar/dashboard/tabbot.",
+        "Pay any supported asset (USDC/ETH/BNB/CELO) to a Tab handle or address. Tab picks the cheapest source from the payer's full balance and executes gaslessly via their 7702 delegation. Example: amount='5' (defaults to USDC) → alice gets 5 USDC on Base. amount='0.2' recipientAsset='BNB' → bob gets 0.2 BNB on BSC. Use this for all generic 'pay X to handle' flows. Requires gasless tipping enabled at thetab.bar/dashboard/tabbot.",
       parameters: {
         type: "object",
         properties: {
-          amountUsd: {
+          amount: {
             type: "string",
-            description: "USD amount as decimal string, e.g. '4.20'.",
+            description:
+              "Amount in recipient asset's natural units. '5' for 5 USDC, '0.2' for 0.2 BNB, '0.05' for 0.05 ETH.",
+          },
+          recipientAsset: {
+            type: "string",
+            enum: ["USDC", "ETH", "BNB", "CELO"],
+            description: "Asset the recipient receives. Defaults to USDC.",
           },
           recipient: {
             type: "string",
@@ -149,15 +155,22 @@ export const tabTools = [
           recipientChain: {
             type: "string",
             enum: ["base", "bsc", "ink", "celo"],
-            description: "Settle USDC on this chain. Defaults to 'base'.",
+            description:
+              "Settle on this chain. Defaults sensibly per recipientAsset (base for USDC/ETH, bsc for BNB, celo for CELO).",
           },
           slippageCap: {
             type: "number",
             description:
-              "Max acceptable slippage (0.01 = 1%). Default 0.01. Routes whose expected output falls below `amountUsd × (1 - slippageCap)` are rejected.",
+              "Max acceptable slippage (0.01 = 1%). Default 0.01. Routes whose expected output falls below the cap are rejected.",
+          },
+          mode: {
+            type: "string",
+            enum: ["tip", "pos"],
+            description:
+              "'tip' (default): sender pays exact, recipient gets less on cross-chain. 'pos': recipient gets exact (preview UX deferred).",
           },
         },
-        required: ["amountUsd", "recipient"],
+        required: ["amount", "recipient"],
       },
     },
   },
@@ -273,19 +286,33 @@ export async function runTool(
         return { ok: true, value };
       }
       case "tab_pay_smart": {
-        const a = requireString(args, "amountUsd");
-        if (!a.ok) return a;
+        // Accept either `amount` (new) or `amountUsd` (legacy alias).
+        const amount =
+          typeof args.amount === "string"
+            ? args.amount
+            : typeof args.amountUsd === "string"
+              ? args.amountUsd
+              : null;
+        if (!amount) return fail("invalid_argument", "Missing field 'amount'");
         const r = requireString(args, "recipient");
         if (!r.ok) return r;
         const value = await tab.pay.smart({
-          amountUsd: a.value,
+          amount,
           recipient: r.value,
+          recipientAsset:
+            typeof args.recipientAsset === "string"
+              ? (args.recipientAsset as "USDC" | "ETH" | "BNB" | "CELO")
+              : undefined,
           recipientChain:
             typeof args.recipientChain === "string"
               ? (args.recipientChain as "base" | "bsc" | "ink" | "celo")
               : undefined,
           slippageCap:
             typeof args.slippageCap === "number" ? args.slippageCap : undefined,
+          mode:
+            typeof args.mode === "string"
+              ? (args.mode as "tip" | "pos")
+              : undefined,
         });
         return { ok: true, value };
       }
