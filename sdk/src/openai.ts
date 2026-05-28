@@ -208,7 +208,70 @@ export const tabTools = [
       },
     },
   },
+  // Unified bridge — any supported asset on any chain → any supported
+  // asset on any chain. Reuses Smart Pay infrastructure with recipient
+  // defaulting to self.
+  {
+    type: "function",
+    function: {
+      name: "tab_bridge_quote",
+      description:
+        "Preview a bridge route. Returns the expected destination amount, USD fee, ETA, and which underlying bridge relay.link picked. Use before tab_bridge_execute.",
+      parameters: bridgeOpenAiSchema(),
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "tab_bridge_execute",
+      description:
+        "Bridge any supported asset on any chain → any supported asset on any chain. Pulls source from the caller's 7702 delegation, swaps via relay.link, delivers to the caller's own wallet (or to `recipient` if specified). Gasless. ~20-30s end-to-end. Requires gasless tipping enabled at thetab.bar/dashboard/tabbot.",
+      parameters: bridgeOpenAiSchema(),
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "tab_bridge_status",
+      description:
+        "Poll the relay.link destination fill state. State transitions pending → filled (or failed/refunded). Public — requestId is the secret.",
+      parameters: {
+        type: "object",
+        properties: {
+          requestId: {
+            type: "string",
+            description: "relay.link request id returned by tab_bridge_execute.",
+          },
+        },
+        required: ["requestId"],
+      },
+    },
+  },
 ];
+
+function bridgeOpenAiSchema() {
+  return {
+    type: "object",
+    properties: {
+      fromChain: { type: "string", enum: ["base", "bsc", "ink", "celo"] },
+      fromAsset: { type: "string", enum: ["USDC", "ETH", "BNB", "CELO"] },
+      toChain: { type: "string", enum: ["base", "bsc", "ink", "celo", "solana"] },
+      toAsset: { type: "string", enum: ["USDC", "ETH", "BNB", "CELO", "SOL"] },
+      amount: {
+        type: "string",
+        description:
+          "Amount in SOURCE asset units. '10' for 10 USDC, '0.05' for 0.05 ETH.",
+      },
+      slippageCap: { type: "number" },
+      recipient: {
+        type: "string",
+        description:
+          "Where to land the destination asset. Defaults to caller's own wallet.",
+      },
+    },
+    required: ["fromChain", "fromAsset", "toChain", "toAsset", "amount"],
+  };
+}
 
 export type ToolResult =
   | { ok: true; value: unknown }
@@ -332,6 +395,41 @@ export async function runTool(
             ? (args.symbols as Array<"ETH" | "BNB" | "CELO" | "SOL" | "USDC">)
             : undefined
         );
+        return { ok: true, value };
+      }
+      case "tab_bridge_quote":
+      case "tab_bridge_execute": {
+        const fc = requireString(args, "fromChain");
+        if (!fc.ok) return fc;
+        const fa = requireString(args, "fromAsset");
+        if (!fa.ok) return fa;
+        const tc = requireString(args, "toChain");
+        if (!tc.ok) return tc;
+        const ta = requireString(args, "toAsset");
+        if (!ta.ok) return ta;
+        const amt = requireString(args, "amount");
+        if (!amt.ok) return amt;
+        const params = {
+          fromChain: fc.value as "base" | "bsc" | "ink" | "celo",
+          fromAsset: fa.value as "USDC" | "ETH" | "BNB" | "CELO",
+          toChain: tc.value as "base" | "bsc" | "ink" | "celo" | "solana",
+          toAsset: ta.value as "USDC" | "ETH" | "BNB" | "CELO" | "SOL",
+          amount: amt.value,
+          slippageCap:
+            typeof args.slippageCap === "number" ? args.slippageCap : undefined,
+          recipient:
+            typeof args.recipient === "string" ? args.recipient : undefined,
+        };
+        const value =
+          name === "tab_bridge_quote"
+            ? await tab.bridge.quote(params)
+            : await tab.bridge.execute(params);
+        return { ok: true, value };
+      }
+      case "tab_bridge_status": {
+        const id = requireString(args, "requestId");
+        if (!id.ok) return id;
+        const value = await tab.bridge.status(id.value);
         return { ok: true, value };
       }
       default:

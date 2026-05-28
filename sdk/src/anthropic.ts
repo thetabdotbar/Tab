@@ -179,7 +179,57 @@ export const tabTools = [
       },
     },
   },
+  // Unified bridge — Smart Pay infrastructure with recipient defaulting
+  // to self. Quote / execute / status mirror the OpenAI + MCP shape.
+  {
+    name: "tab_bridge_quote",
+    description:
+      "Preview a bridge route. Returns the expected destination amount, USD fee, ETA, and which underlying bridge relay.link picked. Use before tab_bridge_execute.",
+    input_schema: bridgeAnthropicSchema(),
+  },
+  {
+    name: "tab_bridge_execute",
+    description:
+      "Bridge any supported asset on any chain → any supported asset on any chain. Pulls source from the caller's 7702 delegation, swaps via relay.link, delivers to the caller's own wallet (or to `recipient` if specified). Gasless. ~20-30s end-to-end. Requires gasless tipping enabled at thetab.bar/dashboard/tabbot.",
+    input_schema: bridgeAnthropicSchema(),
+  },
+  {
+    name: "tab_bridge_status",
+    description:
+      "Poll the relay.link destination fill state. State transitions pending → filled (or failed/refunded). Public — requestId is the secret.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        requestId: { type: "string" },
+      },
+      required: ["requestId"],
+    },
+  },
 ];
+
+function bridgeAnthropicSchema() {
+  return {
+    type: "object" as const,
+    properties: {
+      fromChain: { type: "string", enum: ["base", "bsc", "ink", "celo"] },
+      fromAsset: { type: "string", enum: ["USDC", "ETH", "BNB", "CELO"] },
+      toChain: { type: "string", enum: ["base", "bsc", "ink", "celo", "solana"] },
+      toAsset: { type: "string", enum: ["USDC", "ETH", "BNB", "CELO", "SOL"] },
+      amount: {
+        type: "string",
+        description:
+          "Amount in SOURCE asset units. '10' for 10 USDC, '0.05' for 0.05 ETH.",
+      },
+      slippageCap: { type: "number" },
+      recipient: {
+        type: "string",
+        description:
+          "Where to land the destination asset. Defaults to caller's own wallet.",
+      },
+    },
+    required: ["fromChain", "fromAsset", "toChain", "toAsset", "amount"],
+  };
+}
 
 export type ToolResult =
   | { ok: true; value: unknown }
@@ -302,6 +352,41 @@ export async function runTool(
             ? (input.symbols as Array<"ETH" | "BNB" | "CELO" | "SOL" | "USDC">)
             : undefined
         );
+        return { ok: true, value };
+      }
+      case "tab_bridge_quote":
+      case "tab_bridge_execute": {
+        const fc = requireString(input, "fromChain");
+        if (!fc.ok) return fc;
+        const fa = requireString(input, "fromAsset");
+        if (!fa.ok) return fa;
+        const tc = requireString(input, "toChain");
+        if (!tc.ok) return tc;
+        const ta = requireString(input, "toAsset");
+        if (!ta.ok) return ta;
+        const amt = requireString(input, "amount");
+        if (!amt.ok) return amt;
+        const params = {
+          fromChain: fc.value as "base" | "bsc" | "ink" | "celo",
+          fromAsset: fa.value as "USDC" | "ETH" | "BNB" | "CELO",
+          toChain: tc.value as "base" | "bsc" | "ink" | "celo" | "solana",
+          toAsset: ta.value as "USDC" | "ETH" | "BNB" | "CELO" | "SOL",
+          amount: amt.value,
+          slippageCap:
+            typeof input.slippageCap === "number" ? input.slippageCap : undefined,
+          recipient:
+            typeof input.recipient === "string" ? input.recipient : undefined,
+        };
+        const value =
+          name === "tab_bridge_quote"
+            ? await tab.bridge.quote(params)
+            : await tab.bridge.execute(params);
+        return { ok: true, value };
+      }
+      case "tab_bridge_status": {
+        const id = requireString(input, "requestId");
+        if (!id.ok) return id;
+        const value = await tab.bridge.status(id.value);
         return { ok: true, value };
       }
       default:

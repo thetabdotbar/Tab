@@ -283,7 +283,83 @@ const MCP_TOOLS = [
       },
     },
   },
+  // Unified bridge — any supported asset on any chain → any supported
+  // asset on any chain, all routed through the user's 7702 delegation
+  // + relay.link. Bridge = Smart Pay to self with explicit source.
+  {
+    name: "tab_bridge_quote",
+    description:
+      "Preview a bridge route. Returns the expected destination amount, USD fee, ETA, and which underlying bridge relay.link picked. Use this before tab_bridge_execute to show the user what they'll receive. Source must be EVM (Base/BSC/Ink/Celo); destination can also be Solana for inbound USDC.",
+    inputSchema: bridgeInputSchema(),
+  },
+  {
+    name: "tab_bridge_execute",
+    description:
+      "Execute a bridge from any supported asset on any chain → any supported asset on any chain. Pulls the source asset from the caller's 7702 delegation, swaps via relay.link, and delivers the destination asset to the caller's own wallet (or to `recipient` if specified — that case is equivalent to a cross-asset payment). Same gasless flow as tab_pay_smart. Requires gasless tipping enabled at thetab.bar/dashboard/tabbot. ~20-30s end-to-end; same-asset same-chain rejected as no-op.",
+    inputSchema: bridgeInputSchema(),
+  },
+  {
+    name: "tab_bridge_status",
+    description:
+      "Poll the relay.link destination fill state for a bridge using the requestId returned by tab_bridge_execute. State transitions pending → filled (or failed/refunded). Public — requestId is the secret. Typical fill time 30-60s on EVM destinations, 60-120s on Solana.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        requestId: {
+          type: "string",
+          description: "relay.link request id returned by tab_bridge_execute.",
+        },
+      },
+      required: ["requestId"],
+    },
+  },
 ];
+
+/** Shared input schema for the two bridge tools (quote + execute). */
+function bridgeInputSchema() {
+  return {
+    type: "object",
+    properties: {
+      fromChain: {
+        type: "string",
+        enum: ["base", "bsc", "ink", "celo"],
+        description:
+          "Source chain — EVM only today (Solana source needs SPL Token Approve onboarding, v2).",
+      },
+      fromAsset: {
+        type: "string",
+        enum: ["USDC", "ETH", "BNB", "CELO"],
+        description:
+          "Source asset. USDC is universal across all chains; natives are chain-specific (ETH on base/ink, BNB on bsc, CELO on celo).",
+      },
+      toChain: {
+        type: "string",
+        enum: ["base", "bsc", "ink", "celo", "solana"],
+        description: "Destination chain.",
+      },
+      toAsset: {
+        type: "string",
+        enum: ["USDC", "ETH", "BNB", "CELO", "SOL"],
+        description: "Destination asset.",
+      },
+      amount: {
+        type: "string",
+        description:
+          "Amount in SOURCE asset units. '10' for 10 USDC, '0.05' for 0.05 ETH.",
+      },
+      slippageCap: {
+        type: "number",
+        description: "Max acceptable slippage (0.01 = 1%). Default 0.01.",
+      },
+      recipient: {
+        type: "string",
+        description:
+          "Where to land the destination asset. Defaults to caller's own wallet (self-bridge). Pass another @handle / 0x address to land funds elsewhere — equivalent to a cross-asset payment.",
+      },
+    },
+    required: ["fromChain", "fromAsset", "toChain", "toAsset", "amount"],
+  };
+}
 
 export async function makeTabMcpServer(opts: {
   apiKey: string;
@@ -413,6 +489,37 @@ export async function makeTabMcpServer(opts: {
               ? (a.symbols as Array<"ETH" | "BNB" | "CELO" | "SOL" | "USDC">)
               : undefined
           );
+          break;
+        case "tab_bridge_quote":
+        case "tab_bridge_execute": {
+          const bridgeParams = {
+            fromChain: String(a.fromChain) as "base" | "bsc" | "ink" | "celo",
+            fromAsset: String(a.fromAsset) as "USDC" | "ETH" | "BNB" | "CELO",
+            toChain: String(a.toChain) as
+              | "base"
+              | "bsc"
+              | "ink"
+              | "celo"
+              | "solana",
+            toAsset: String(a.toAsset) as
+              | "USDC"
+              | "ETH"
+              | "BNB"
+              | "CELO"
+              | "SOL",
+            amount: String(a.amount),
+            slippageCap:
+              typeof a.slippageCap === "number" ? a.slippageCap : undefined,
+            recipient: a.recipient ? String(a.recipient) : undefined,
+          };
+          result =
+            name === "tab_bridge_quote"
+              ? await tab.bridge.quote(bridgeParams)
+              : await tab.bridge.execute(bridgeParams);
+          break;
+        }
+        case "tab_bridge_status":
+          result = await tab.bridge.status(String(a.requestId));
           break;
         default:
           throw new Error(`Unknown tool: ${name}`);

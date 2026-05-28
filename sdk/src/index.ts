@@ -126,6 +126,11 @@ export class Tab {
   public readonly pay: PayResource;
   public readonly balances: BalancesResource;
   public readonly prices: PricesResource;
+  /** Bridge any supported asset on any chain → any supported asset on
+   *  any chain, gasless via your 7702 delegation. Internally reuses
+   *  the Smart Pay infrastructure with recipient defaulting to self —
+   *  the bridge IS a self-pay. */
+  public readonly bridge: BridgeResource;
 
   constructor(cfg: TabConfig) {
     if (!cfg.apiKey) throw new Error("Tab: apiKey is required");
@@ -145,6 +150,7 @@ export class Tab {
     this.pay = new PayResource(this);
     this.balances = new BalancesResource(this);
     this.prices = new PricesResource(this);
+    this.bridge = new BridgeResource(this);
   }
 
   /** @internal */
@@ -1046,6 +1052,127 @@ export class PayResource {
    *  pre-confirm preview UX is on the roadmap). */
   async smart(params: SmartPayParams): Promise<SmartPayResult> {
     return this.tab.request("POST", "/api/pay/smart", { body: params });
+  }
+
+  /** Preview a Smart Pay route — returns the planned execution without
+   *  pulling any funds. Mirror of `.smart()`'s response shape but kind
+   *  may be "insufficient" if the route can't cover the amount within
+   *  slippage. Useful for previewing before showing the user a Confirm. */
+  async smartQuote(params: SmartPayParams): Promise<SmartPayQuoteResult> {
+    return this.tab.request("POST", "/api/pay/smart/quote", { body: params });
+  }
+}
+
+/* ---------- Bridge (self-pay) ---------- */
+
+export type BridgeAsset = "USDC" | "ETH" | "BNB" | "CELO" | "SOL";
+export type BridgeChain = "base" | "bsc" | "ink" | "celo" | "solana";
+
+export type BridgeParams = {
+  /** Where you're moving FROM. EVM-only as a source today — Solana
+   *  source needs SPL Token Approve onboarding (v2). */
+  fromChain: "base" | "bsc" | "ink" | "celo";
+  /** Source asset. USDC on every chain; natives chain-specific
+   *  (ETH on base/ink, BNB on bsc, CELO on celo). */
+  fromAsset: BridgeAsset;
+  /** Where the bridged asset should land. Destination supports Solana
+   *  for incoming USDC. */
+  toChain: BridgeChain;
+  /** Destination asset. */
+  toAsset: BridgeAsset;
+  /** Amount in SOURCE asset units. "10" for 10 USDC, "0.05" for 0.05 ETH. */
+  amount: string;
+  /** Max acceptable slippage as a fraction. Default 0.01 (1%). */
+  slippageCap?: number;
+  /** Where to land the destination asset. Defaults to the authenticated
+   *  agent's own wallet (self-bridge). Pass another @handle or 0x
+   *  address to land funds in a different account — equivalent to a
+   *  cross-asset payment. */
+  recipient?: string;
+};
+
+export type BridgeQuoteResult = SmartPayQuoteResult;
+export type BridgeExecuteResult = SmartPayResult;
+
+export type SmartPayQuoteResult =
+  | {
+      ok: true;
+      kind: "direct" | "relay";
+      recipientAmount: string;
+      recipientAsset: SmartPayAsset;
+      recipientChain: string;
+      senderPaysAmount: string;
+      senderPaysAsset: string;
+      senderPaysChain: string;
+      feeAmount?: string;
+      recipientAmountUsd: number;
+      senderPaysUsd: number;
+      feeUsd: number;
+      etaSeconds?: number;
+      bridge?: string;
+    }
+  | {
+      ok: true;
+      kind: "insufficient";
+      totalAvailableUsd: number;
+      amountNeededUsd: number;
+    }
+  | { ok: false; reason: string };
+
+export class BridgeResource {
+  constructor(private readonly tab: Tab) {}
+
+  /** Preview a bridge route. Returns the planned execution (direct or
+   *  relay), expected output, fee, and ETA. Identical infrastructure
+   *  to `tab.pay.smart`, just with sender = recipient by default. */
+  async quote(params: BridgeParams): Promise<BridgeQuoteResult> {
+    return this.tab.request("POST", "/api/pay/smart/quote", {
+      body: this.body(params),
+    });
+  }
+
+  /** Execute the bridge. Pulls the source asset from the caller's 7702
+   *  delegation, swaps via relay.link, and delivers the destination
+   *  asset to `recipient` (defaults to the caller's own wallet — a
+   *  self-bridge). Same gasless flow as `tab.pay.smart`. */
+  async execute(params: BridgeParams): Promise<BridgeExecuteResult> {
+    return this.tab.request("POST", "/api/pay/smart", {
+      body: this.body(params),
+    });
+  }
+
+  /** Poll relay.link's destination fill state for a bridge. Returns
+   *  one of "pending"/"filled"/"failed"/"refunded"/"delayed"/"unknown",
+   *  plus the destination tx hash once filled. */
+  async status(requestId: string): Promise<{
+    ok: true;
+    state: "pending" | "filled" | "failed" | "refunded" | "delayed" | "unknown";
+    destTxHash?: string;
+    message?: string;
+  }> {
+    return this.tab.request(
+      "GET",
+      `/api/pay/smart/status?requestId=${encodeURIComponent(requestId)}`,
+      { auth: false }
+    );
+  }
+
+  /** Translate user-facing bridge params into the explicit-source
+   *  Smart Pay body shape. The server's /api/pay/smart endpoint reads
+   *  sourceChain/sourceAsset/sourceAmount as the bridge / exact-input
+   *  branch, distinct from the "I want recipient to get exactly X"
+   *  flow. Recipient defaults to the special "self" sentinel, which
+   *  the server expands to the authenticated caller's address. */
+  private body(p: BridgeParams) {
+    return {
+      sourceChain: p.fromChain,
+      sourceAsset: p.fromAsset,
+      sourceAmount: p.amount,
+      recipientChain: p.toChain,
+      recipientAsset: p.toAsset === "SOL" ? "USDC" : p.toAsset,
+      recipient: p.recipient ?? "self",
+      slippageCap: p.slippageCap,
+    };
   }
 }
 

@@ -75,6 +75,43 @@ await tab.pay.smart({ amountUsd: "10.00", recipient: "@alice" });
 await tab.pay.smart({ amountUsd: "10.00", recipient: "@alice", mode: "pos" });
 ```
 
+## Bridge (any asset → any asset)
+
+Bridge any supported asset on any chain to any supported asset on any chain. Internally the same Smart Pay infrastructure as `tab.pay.smart` — the bridge is just a self-pay with explicit source. Gasless via the caller's 7702 delegation. Same `~20-30s` end-to-end timing.
+
+```ts
+// Preview before executing
+const quote = await tab.bridge.quote({
+  fromChain: "base",
+  fromAsset: "ETH",
+  toChain: "bsc",
+  toAsset: "USDC",
+  amount: "0.05",
+});
+console.log(`You'll get ~${quote.recipientAmount} USDC on BSC (fee $${quote.feeUsd})`);
+
+// Execute when ready
+const result = await tab.bridge.execute({
+  fromChain: "base",
+  fromAsset: "ETH",
+  toChain: "bsc",
+  toAsset: "USDC",
+  amount: "0.05",
+});
+
+// Poll relay.link for destination fill
+if (result.kind === "relay" && result.requestId) {
+  while (true) {
+    const s = await tab.bridge.status(result.requestId);
+    if (s.state === "filled") break;
+    if (s.state === "failed" || s.state === "refunded") throw new Error(s.state);
+    await new Promise((r) => setTimeout(r, 5000));
+  }
+}
+```
+
+Same-chain swaps (e.g. ETH → USDC on Base), cross-chain bridges (USDC on Base → USDC on BSC), and cross-asset cross-chain (ETH on Base → BNB on BSC) all go through the same call. Source chain must be EVM (Base/BSC/Ink/Celo); destination can also be Solana (for inbound USDC).
+
 ### Aggregate balance + spot prices
 
 ```ts
