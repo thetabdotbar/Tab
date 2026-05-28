@@ -119,6 +119,13 @@ export class Tab {
   // primitives for "agent pays agent" flows.
   public readonly agents: AgentsResource;
   public readonly x402: X402Resource;
+  // Smart Pay primitives — pay $X to any handle from whatever asset
+  // covers it cheapest, aggregate USD balance across all chains, and
+  // public spot prices. The unlock for agents that just want to "pay
+  // $5 to @alice" without picking a chain or asset.
+  public readonly pay: PayResource;
+  public readonly balances: BalancesResource;
+  public readonly prices: PricesResource;
 
   constructor(cfg: TabConfig) {
     if (!cfg.apiKey) throw new Error("Tab: apiKey is required");
@@ -135,6 +142,9 @@ export class Tab {
     this.subscriptions = new SubscriptionsResource(this);
     this.agents = new AgentsResource(this);
     this.x402 = new X402Resource(this);
+    this.pay = new PayResource(this);
+    this.balances = new BalancesResource(this);
+    this.prices = new PricesResource(this);
   }
 
   /** @internal */
@@ -947,5 +957,112 @@ export class X402Resource {
       `/api/x402/verify?orderId=${encodeURIComponent(orderId)}`,
       { auth: false }
     );
+  }
+}
+
+/* ---------- Smart Pay ---------- */
+
+export type SmartPayParams = {
+  /** USD amount as a decimal string ("4.20"). */
+  amountUsd: string;
+  /** EVM 0x address OR @handle the caller has already resolved. The
+   *  endpoint also accepts a handle — pass `recipientHandle` instead
+   *  if you don't have the address yet. */
+  recipient: string;
+  /** Settle USDC on this chain. Defaults to "base". */
+  recipientChain?: "base" | "bsc" | "ink" | "celo";
+  /** Max acceptable slippage as a fraction (0.01 = 1%). Default 0.01. */
+  slippageCap?: number;
+};
+
+export type SmartPayResult =
+  | {
+      ok: true;
+      kind: "direct";
+      txHash: string;
+      route: {
+        kind: "direct";
+        chain: string;
+        expectedOutUsd: number;
+      };
+    }
+  | {
+      ok: true;
+      kind: "relay";
+      pullTxHash: string;
+      sourceTxHash: string;
+      sourceChain: string;
+      destinationChain: string;
+      expectedOutUsd: number;
+    };
+
+export class PayResource {
+  constructor(private readonly tab: Tab) {}
+
+  /** Pay an arbitrary USD amount to a Tab handle. The server picks
+   *  the cheapest source asset across all your chains, executes
+   *  gaslessly via your 7702 delegation, and lands USDC at the
+   *  recipient.
+   *
+   *  Direct path (USDC already on dest chain): single tx, ~3s.
+   *  Cross-asset path (e.g. ETH → USDC via relay.link): pull-then-
+   *  swap, ~20-30s. Server-side simulation rejects the route if
+   *  expected output is below `amountUsd × (1 - slippageCap)`. */
+  async smart(params: SmartPayParams): Promise<SmartPayResult> {
+    return this.tab.request("POST", "/api/pay/smart", { body: params });
+  }
+}
+
+/* ---------- Balance aggregation ---------- */
+
+export type BalanceRow = {
+  chain: string;
+  symbol: string;
+  balance: string;
+  usd: number;
+  isStable: boolean;
+};
+
+export type TotalBalanceResult = {
+  totalUsd: number;
+  breakdown: BalanceRow[];
+  fetchedAt: number;
+};
+
+export class BalancesResource {
+  constructor(private readonly tab: Tab) {}
+
+  /** Aggregated USD balance across every active EVM chain + Solana,
+   *  with per-row breakdown (stable + native). Used by agents to
+   *  decide whether they can fund a payment before calling pay.smart. */
+  async total(opts: {
+    address: string;
+    solanaAddress?: string;
+  }): Promise<TotalBalanceResult> {
+    const params = new URLSearchParams({ address: opts.address });
+    if (opts.solanaAddress) params.set("solanaAddress", opts.solanaAddress);
+    return this.tab.request("GET", `/api/balance/total?${params}`);
+  }
+}
+
+/* ---------- Spot prices ---------- */
+
+export type PricesResult = {
+  prices: Record<string, number>;
+  fetchedAt: number;
+};
+
+export class PricesResource {
+  constructor(private readonly tab: Tab) {}
+
+  /** USD spot prices for the assets Tab supports (ETH, BNB, CELO,
+   *  SOL, USDC). Backed by a multi-source feed (CoinGecko → Binance
+   *  → Coinbase) with 60s cache + CDN edge cache. Public — no API
+   *  key needed, safe to call freely. */
+  async list(symbols?: Array<"ETH" | "BNB" | "CELO" | "SOL" | "USDC">): Promise<PricesResult> {
+    const path = symbols && symbols.length > 0
+      ? `/api/prices?symbols=${symbols.join(",")}`
+      : "/api/prices";
+    return this.tab.request("GET", path, { auth: false });
   }
 }

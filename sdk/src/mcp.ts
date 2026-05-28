@@ -215,6 +215,61 @@ const MCP_TOOLS = [
       required: ["order_id"],
     },
   },
+  // Smart Pay — the "one button, any asset" primitive. Use this when
+  // your agent just wants to pay $X to a Tab handle and doesn't care
+  // which chain or which asset funds it. The server picks the cheapest
+  // source from the caller's full balance, executes gaslessly via
+  // their EIP-7702 delegation, and lands USDC at the recipient.
+  {
+    name: "tab_pay_smart",
+    description:
+      "Pay $X USD to a Tab handle. The server picks the cheapest source asset across all your chains and executes gaslessly via your 7702 delegation. Direct path (USDC on dest chain) takes ~3s; cross-asset (e.g. ETH → USDC bridge) ~20-30s. Requires gasless tipping enabled at thetab.bar/dashboard/tabbot.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        amountUsd: { type: "string", description: "USD amount, decimal string like '4.20'." },
+        recipient: { type: "string", description: "EVM 0x address OR Tab @handle." },
+        recipientChain: {
+          type: "string",
+          enum: ["base", "bsc", "ink", "celo"],
+          description: "Settle USDC on this EVM chain. Defaults to 'base'.",
+        },
+        slippageCap: {
+          type: "number",
+          description: "Max acceptable slippage (0.01 = 1%). Default 0.01.",
+        },
+      },
+      required: ["amountUsd", "recipient"],
+    },
+  },
+  {
+    name: "tab_balances_total",
+    description:
+      "Aggregated USD balance across every active EVM chain + Solana, with per-row breakdown of each asset. Use before tab_pay_smart to confirm the caller can fund the payment without making the round-trip.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        address: { type: "string", description: "EVM 0x address to query." },
+        solanaAddress: { type: "string", description: "Solana base58 address (optional)." },
+      },
+      required: ["address"],
+    },
+  },
+  {
+    name: "tab_prices_list",
+    description:
+      "USD spot prices for ETH, BNB, CELO, SOL, USDC. Backed by CoinGecko → Binance → Coinbase with multi-source fallback. Public, no API key needed. Use this to display USD-denominated balances or denominate quotes.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        symbols: {
+          type: "array",
+          items: { type: "string", enum: ["ETH", "BNB", "CELO", "SOL", "USDC"] },
+          description: "Subset of symbols to fetch. Defaults to all.",
+        },
+      },
+    },
+  },
 ];
 
 export async function makeTabMcpServer(opts: {
@@ -314,6 +369,31 @@ export async function makeTabMcpServer(opts: {
           break;
         case "tab_x402_verify":
           result = await tab.x402.verify(String(a.order_id));
+          break;
+        case "tab_pay_smart":
+          result = await tab.pay.smart({
+            amountUsd: String(a.amountUsd),
+            recipient: String(a.recipient),
+            recipientChain:
+              a.recipientChain
+                ? (String(a.recipientChain) as "base" | "bsc" | "ink" | "celo")
+                : undefined,
+            slippageCap:
+              typeof a.slippageCap === "number" ? a.slippageCap : undefined,
+          });
+          break;
+        case "tab_balances_total":
+          result = await tab.balances.total({
+            address: String(a.address),
+            solanaAddress: a.solanaAddress ? String(a.solanaAddress) : undefined,
+          });
+          break;
+        case "tab_prices_list":
+          result = await tab.prices.list(
+            Array.isArray(a.symbols)
+              ? (a.symbols as Array<"ETH" | "BNB" | "CELO" | "SOL" | "USDC">)
+              : undefined
+          );
           break;
         default:
           throw new Error(`Unknown tool: ${name}`);

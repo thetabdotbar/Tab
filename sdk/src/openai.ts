@@ -128,6 +128,73 @@ export const tabTools = [
       },
     },
   },
+  // Smart Pay tools — the "one button, any asset" primitives.
+  {
+    type: "function" as const,
+    function: {
+      name: "tab_pay_smart",
+      description:
+        "Pay $X USD to a Tab handle or 0x address. Tab picks the cheapest source asset across all your chains and executes gaslessly via your 7702 delegation. Use this instead of tab_create_payment when you don't care which chain/asset funds the payment. Requires gasless tipping enabled at thetab.bar/dashboard/tabbot.",
+      parameters: {
+        type: "object",
+        properties: {
+          amountUsd: {
+            type: "string",
+            description: "USD amount as decimal string, e.g. '4.20'.",
+          },
+          recipient: {
+            type: "string",
+            description: "EVM 0x address OR Tab @handle.",
+          },
+          recipientChain: {
+            type: "string",
+            enum: ["base", "bsc", "ink", "celo"],
+            description: "Settle USDC on this chain. Defaults to 'base'.",
+          },
+          slippageCap: {
+            type: "number",
+            description:
+              "Max acceptable slippage (0.01 = 1%). Default 0.01. Routes whose expected output falls below `amountUsd × (1 - slippageCap)` are rejected.",
+          },
+        },
+        required: ["amountUsd", "recipient"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "tab_balances_total",
+      description:
+        "Aggregated USD balance across every active EVM chain + Solana, with per-row breakdown. Use this before tab_pay_smart to confirm the wallet can cover the payment.",
+      parameters: {
+        type: "object",
+        properties: {
+          address: { type: "string", description: "EVM 0x address." },
+          solanaAddress: { type: "string", description: "Solana base58 address (optional)." },
+        },
+        required: ["address"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "tab_prices_list",
+      description:
+        "USD spot prices for ETH, BNB, CELO, SOL, USDC. Multi-source fallback (CoinGecko → Binance → Coinbase). Public, no API key needed.",
+      parameters: {
+        type: "object",
+        properties: {
+          symbols: {
+            type: "array",
+            items: { type: "string", enum: ["ETH", "BNB", "CELO", "SOL", "USDC"] },
+            description: "Subset of symbols. Defaults to all.",
+          },
+        },
+      },
+    },
+  },
 ];
 
 export type ToolResult =
@@ -203,6 +270,41 @@ export async function runTool(
         const h = requireString(args, "handle");
         if (!h.ok) return h;
         const value = await createWallet(tab, { handle: h.value });
+        return { ok: true, value };
+      }
+      case "tab_pay_smart": {
+        const a = requireString(args, "amountUsd");
+        if (!a.ok) return a;
+        const r = requireString(args, "recipient");
+        if (!r.ok) return r;
+        const value = await tab.pay.smart({
+          amountUsd: a.value,
+          recipient: r.value,
+          recipientChain:
+            typeof args.recipientChain === "string"
+              ? (args.recipientChain as "base" | "bsc" | "ink" | "celo")
+              : undefined,
+          slippageCap:
+            typeof args.slippageCap === "number" ? args.slippageCap : undefined,
+        });
+        return { ok: true, value };
+      }
+      case "tab_balances_total": {
+        const addr = requireString(args, "address");
+        if (!addr.ok) return addr;
+        const value = await tab.balances.total({
+          address: addr.value,
+          solanaAddress:
+            typeof args.solanaAddress === "string" ? args.solanaAddress : undefined,
+        });
+        return { ok: true, value };
+      }
+      case "tab_prices_list": {
+        const value = await tab.prices.list(
+          Array.isArray(args.symbols)
+            ? (args.symbols as Array<"ETH" | "BNB" | "CELO" | "SOL" | "USDC">)
+            : undefined
+        );
         return { ok: true, value };
       }
       default:
