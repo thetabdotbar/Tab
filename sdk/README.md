@@ -189,7 +189,7 @@ const msg = await anthropic.messages.create({
   max_tokens: 1024,
   tools: tabTools,
   messages: [
-    { role: "user", content: "Send 3 USDC to @bob on optimism, memo: 'lunch'." },
+    { role: "user", content: "Send 3 USDC to @bob on base, memo: 'lunch'." },
   ],
 });
 
