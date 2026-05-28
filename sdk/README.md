@@ -15,7 +15,51 @@ const tab = new Tab({
   apiKey: process.env.TAB_API_KEY!,    // sk_live_... or sk_test_...
   baseUrl: process.env.TAB_BASE_URL!,  // required, e.g. https://tab.yourdomain.com
 });
+```
 
+## Smart Pay (recommended)
+
+One call, any asset, any chain. The server picks the cheapest source across every chain you hold balance on, then executes gaslessly via your EIP-7702 delegation. Direct path (USDC already on dest chain) lands in ~3s; cross-asset (e.g. ETH → USDC bridge) ~20-30s.
+
+```ts
+// Pay $20 to @alice — Tab picks whatever source covers it cheapest
+const result = await tab.pay.smart({
+  amountUsd: "20.00",
+  recipient: "@alice",            // handle or 0x address
+  recipientChain: "base",         // optional, default "base"
+  slippageCap: 0.01,              // optional, default 1%
+});
+
+if (result.kind === "direct") {
+  console.log("Tx:", result.txHash);
+} else {
+  console.log("Pull tx:", result.pullTxHash);
+  console.log("Source swap:", result.sourceTxHash);
+}
+```
+
+Requires the payer wallet to have [gasless tipping enabled](https://thetab.bar/dashboard/tabbot) (one EIP-7702 signature). After that, every Smart Pay call is fully gasless.
+
+### Aggregate balance + spot prices
+
+```ts
+// Total USD balance across all chains, with breakdown
+const balance = await tab.balances.total({
+  address: "0x...",
+  solanaAddress: "...",
+});
+console.log("Total:", balance.totalUsd);
+
+// Multi-source spot prices (no API key needed)
+const prices = await tab.prices.list();
+console.log("ETH:", prices.prices.ETH);
+```
+
+## Legacy orders (external customers)
+
+When the payer isn't on Tab (e.g. a customer paying via MetaMask), use the hosted checkout flow — the customer signs an EIP-2612 permit on the checkout page, no Tab account required.
+
+```ts
 const { order, checkout_url } = await tab.orders.create({
   amount: "12.50",
   chain: "base",
@@ -29,7 +73,7 @@ const settled = await tab.orders.waitForSettlement(order.id, {
 });
 ```
 
-`waitForSettlement` is tolerant of transient network errors (a few retries with backoff before it gives up) and respects an external `AbortSignal` so you can cancel cleanly.
+`waitForSettlement` is tolerant of transient network errors and respects an external `AbortSignal`.
 
 ## OpenAI
 
