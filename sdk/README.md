@@ -110,7 +110,9 @@ if (result.kind === "relay" && result.requestId) {
 }
 ```
 
-Same-chain swaps (e.g. ETH → USDC on Base), cross-chain bridges (USDC on Base → USDC on BSC), and cross-asset cross-chain (ETH on Base → BNB on BSC) all go through the same call. Source chain must be EVM (Base/BSC/Ink/Celo); destination can also be Solana (for inbound USDC).
+Same-chain swaps (e.g. ETH → USDC on Base), cross-chain bridges (USDC on Base → USDC on BSC), and cross-asset cross-chain (ETH on Base → BNB on BSC) all go through the same call. Source and destination can be EVM (Base/BSC/Ink/Celo) **or Solana** — Solana sources use the user's Subscriptions Delegation Program approval for USDC + wSOL.
+
+For users who land on Tab with only EVM USDC and need SOL for the Solana Smart Pay onboarding tx, `tab.solana.topUp({ amountSol: "0.07" })` pulls USDC via the user's 7702 delegation and bridges native SOL to their Solana wallet through relay.link.
 
 ### Aggregate balance + spot prices
 

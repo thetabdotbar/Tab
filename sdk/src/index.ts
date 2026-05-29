@@ -131,6 +131,9 @@ export class Tab {
    *  the Smart Pay infrastructure with recipient defaulting to self —
    *  the bridge IS a self-pay. */
   public readonly bridge: BridgeResource;
+  /** Solana-specific helpers. Currently exposes top-up (EVM USDC →
+   *  native SOL via relay.link) for the Smart Pay onboarding flow. */
+  public readonly solana: SolanaResource;
 
   constructor(cfg: TabConfig) {
     if (!cfg.apiKey) throw new Error("Tab: apiKey is required");
@@ -151,6 +154,7 @@ export class Tab {
     this.balances = new BalancesResource(this);
     this.prices = new PricesResource(this);
     this.bridge = new BridgeResource(this);
+    this.solana = new SolanaResource(this);
   }
 
   /** @internal */
@@ -968,21 +972,25 @@ export class X402Resource {
 
 /* ---------- Smart Pay (asset-aware) ---------- */
 
-export type SmartPayAsset = "USDC" | "ETH" | "BNB" | "CELO";
+export type SmartPayAsset = "USDC" | "ETH" | "BNB" | "CELO" | "SOL";
 
 export type SmartPayParams = {
   /** Amount in the recipient asset's natural units. "5" for 5 USDC,
-   *  "0.2" for 0.2 BNB, "0.05" for 0.05 ETH. */
+   *  "0.2" for 0.2 BNB, "0.05" for 0.05 ETH, "0.1" for 0.1 SOL. */
   amount: string;
-  /** What the recipient receives. Defaults to USDC. */
+  /** What the recipient receives. Defaults to USDC. SOL only valid
+   *  when recipientChain is "solana". */
   recipientAsset?: SmartPayAsset;
-  /** EVM 0x address OR Tab @handle. The endpoint resolves handles
-   *  server-side. */
+  /** EVM 0x address, Solana base58 address, OR Tab @handle. The
+   *  endpoint resolves handles server-side, picking the recipient's
+   *  EVM wallet or Solana wallet based on recipientChain. */
   recipient: string;
   /** Settle on this chain. Defaults sensibly per recipientAsset —
-   *  base for USDC/ETH, bsc for BNB, celo for CELO. */
-  recipientChain?: "base" | "bsc" | "ink" | "celo";
-  /** Max acceptable slippage as a fraction (0.01 = 1%). Default 0.01. */
+   *  base for USDC/ETH, bsc for BNB, celo for CELO, solana for SOL. */
+  recipientChain?: "base" | "bsc" | "ink" | "celo" | "solana";
+  /** Max acceptable slippage as a fraction (0.02 = 2%). Default 0.02
+   *  — covers typical relay.link bridge fee + DEX slippage on small
+   *  cross-chain amounts. */
   slippageCap?: number;
   /** "tip" (default): sender pays exact, recipient gets less on
    *  cross-chain. "pos": recipient gets exact (preview UX in roadmap). */
@@ -1069,20 +1077,21 @@ export type BridgeAsset = "USDC" | "ETH" | "BNB" | "CELO" | "SOL";
 export type BridgeChain = "base" | "bsc" | "ink" | "celo" | "solana";
 
 export type BridgeParams = {
-  /** Where you're moving FROM. EVM-only as a source today — Solana
-   *  source needs SPL Token Approve onboarding (v2). */
-  fromChain: "base" | "bsc" | "ink" | "celo";
+  /** Where you're moving FROM. EVM sources work today. Solana sources
+   *  go through the user's Solana Smart Pay delegation (USDC + wSOL),
+   *  same one-signature onboarding as EVM 7702. */
+  fromChain: BridgeChain;
   /** Source asset. USDC on every chain; natives chain-specific
-   *  (ETH on base/ink, BNB on bsc, CELO on celo). */
+   *  (ETH on base/ink, BNB on bsc, CELO on celo, SOL on solana). */
   fromAsset: BridgeAsset;
-  /** Where the bridged asset should land. Destination supports Solana
-   *  for incoming USDC. */
+  /** Where the bridged asset should land. Destination supports every
+   *  chain — Solana for USDC + native SOL, EVM for USDC + natives. */
   toChain: BridgeChain;
   /** Destination asset. */
   toAsset: BridgeAsset;
   /** Amount in SOURCE asset units. "10" for 10 USDC, "0.05" for 0.05 ETH. */
   amount: string;
-  /** Max acceptable slippage as a fraction. Default 0.01 (1%). */
+  /** Max acceptable slippage as a fraction. Default 0.02 (2%). */
   slippageCap?: number;
   /** Where to land the destination asset. Defaults to the authenticated
    *  agent's own wallet (self-bridge). Pass another @handle or 0x
@@ -1173,6 +1182,51 @@ export class BridgeResource {
       recipient: p.recipient ?? "self",
       slippageCap: p.slippageCap,
     };
+  }
+}
+
+/* ---------- Solana helpers ---------- */
+
+export type SolanaTopUpParams = {
+  /** SOL amount you want to land on the caller's Solana wallet,
+   *  e.g. "0.07". Hard ceiling 1 SOL — anything larger should go
+   *  through `tab.bridge.execute` directly so the route quote is
+   *  surfaced before submission. */
+  amountSol: string;
+  /** Optional EVM source chain to pull USDC from. Defaults to the
+   *  cheapest chain on which the caller has an active 7702
+   *  delegation. */
+  sourceChain?: "base" | "bsc" | "ink" | "celo";
+};
+
+export type SolanaTopUpResult =
+  | {
+      ok: true;
+      pullTxHash: string;
+      sourceTxHash: string;
+      requestId: string;
+      expectedSolOut: string;
+      usdcPulled: string;
+      sourceChain: "base" | "bsc" | "ink" | "celo";
+    }
+  | { ok: false; reason: string };
+
+export class SolanaResource {
+  constructor(private readonly tab: Tab) {}
+
+  /** Bridge native SOL onto the caller's Solana wallet using their
+   *  EVM USDC + 7702 delegation. Targeted at the Solana Smart Pay
+   *  onboarding flow — when a user lands on Tab with EVM funds but
+   *  no SOL, this gets them past the "need SOL for the enable tx"
+   *  blocker without a CEX detour.
+   *
+   *  Internally: pull USDC via 7702 → relay.link bridge with
+   *  `toToken: wSOL mint` → relay's relayer unwraps to native SOL on
+   *  delivery. Bumps USDC pull amount by 15% to absorb bridge fee +
+   *  DEX slippage; any leftover post-bridge is delivered as extra
+   *  SOL (relay's EXACT_INPUT mode means there is no refund). */
+  async topUp(params: SolanaTopUpParams): Promise<SolanaTopUpResult> {
+    return this.tab.request("POST", "/api/solana/top-up", { body: params });
   }
 }
 

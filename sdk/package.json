@@ -1,7 +1,7 @@
 {
   "name": "@tabdotbar/agent-sdk",
-  "version": "0.4.1",
-  "description": "Tab payment rail for autonomous agents. Smart Pay (one $X call, any asset/chain), unified Bridge (any asset to any asset across chains), 7702 gasless tipping, x402, ERC-8004. Tool schemas for OpenAI, Anthropic, and MCP.",
+  "version": "0.5.0",
+  "description": "Tab payment rail for autonomous agents. Smart Pay (one $X call, any asset/chain, EVM + Solana), unified Bridge (any asset to any asset across chains), Solana Smart Pay via Subscriptions Delegation Program, gasless tipping (EIP-7702 + Solana fee-payer), x402, ERC-8004. Tool schemas for OpenAI, Anthropic, and MCP.",
   "license": "MIT",
   "homepage": "https://thetab.bar/docs/agents/base-mcp",
   "type": "module",
