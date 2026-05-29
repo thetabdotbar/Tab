@@ -113,39 +113,47 @@ export const tabTools = [
   {
     name: "tab_pay_smart",
     description:
-      "Pay any supported asset (USDC/ETH/BNB/CELO) to a Tab handle or address. Tab picks the cheapest source from the payer's full balance and executes gaslessly via their 7702 delegation. amount='5' (defaults to USDC) → alice gets 5 USDC; amount='0.2' recipientAsset='BNB' → bob gets 0.2 BNB. Requires gasless tipping enabled at thetab.bar/dashboard/tabbot.",
+      "Pay any supported asset (USDC/ETH/BNB/CELO/SOL) to a Tab handle or address on any chain (Base/BSC/Ink/Celo/Solana). Tab picks the cheapest source from the payer's full balance and executes gaslessly via their 7702 delegation (EVM) or Subscriptions Delegation Program (Solana). When no single source covers the amount but the wallet's total does, fans out N legs in parallel (kind:multi). amount='5' → alice gets 5 USDC on Base; amount='0.2' recipientAsset='BNB' → bob gets 0.2 BNB on BSC; amount='0.1' recipientAsset='SOL' recipientChain='solana' → carol gets 0.1 SOL. Requires gasless tipping enabled at thetab.bar/dashboard/tabbot.",
     input_schema: {
       type: "object" as const,
       properties: {
         amount: {
           type: "string",
           description:
-            "Amount in recipient asset's natural units. '5' for 5 USDC, '0.2' for 0.2 BNB.",
+            "Amount in recipient asset's natural units. '5' for 5 USDC, '0.2' for 0.2 BNB, '0.1' for 0.1 SOL.",
         },
         recipientAsset: {
           type: "string",
-          enum: ["USDC", "ETH", "BNB", "CELO"],
-          description: "Asset the recipient receives. Defaults to USDC.",
+          enum: ["USDC", "ETH", "BNB", "CELO", "SOL"],
+          description:
+            "Asset the recipient receives. Defaults to USDC. SOL only valid when recipientChain is 'solana'.",
         },
         recipient: {
           type: "string",
-          description: "EVM 0x address OR Tab @handle.",
+          description:
+            "EVM 0x address, Solana base58 address, OR Tab @handle.",
         },
         recipientChain: {
           type: "string",
-          enum: ["base", "bsc", "ink", "celo"],
+          enum: ["base", "bsc", "ink", "celo", "solana"],
           description:
             "Settle on this chain. Defaults sensibly per recipientAsset.",
         },
         slippageCap: {
           type: "number",
-          description: "Max acceptable slippage (0.01 = 1%). Default 0.01.",
+          description:
+            "Max acceptable slippage (0.02 = 2%). Default 0.02 — covers typical relay.link bridge fee + DEX slippage on small cross-chain amounts.",
         },
         mode: {
           type: "string",
           enum: ["tip", "pos"],
           description:
             "'tip' = sender pays exact (recipient gets less on cross-chain). 'pos' = recipient gets exact (preview UX in roadmap).",
+        },
+        orderId: {
+          type: "string",
+          description:
+            "Optional Order id. When set, Tab marks the order completed server-side + fires order.completed after Smart Pay lands. Critical for native orders (no indexer fallback).",
         },
       },
       required: ["amount", "recipient"],
@@ -321,11 +329,11 @@ export async function runTool(
           recipient: r.value,
           recipientAsset:
             typeof input.recipientAsset === "string"
-              ? (input.recipientAsset as "USDC" | "ETH" | "BNB" | "CELO")
+              ? (input.recipientAsset as "USDC" | "ETH" | "BNB" | "CELO" | "SOL")
               : undefined,
           recipientChain:
             typeof input.recipientChain === "string"
-              ? (input.recipientChain as "base" | "bsc" | "ink" | "celo")
+              ? (input.recipientChain as "base" | "bsc" | "ink" | "celo" | "solana")
               : undefined,
           slippageCap:
             typeof input.slippageCap === "number" ? input.slippageCap : undefined,
@@ -333,6 +341,8 @@ export async function runTool(
             typeof input.mode === "string"
               ? (input.mode as "tip" | "pos")
               : undefined,
+          orderId:
+            typeof input.orderId === "string" ? input.orderId : undefined,
         });
         return { ok: true, value };
       }

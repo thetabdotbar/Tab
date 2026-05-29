@@ -995,6 +995,15 @@ export type SmartPayParams = {
   /** "tip" (default): sender pays exact, recipient gets less on
    *  cross-chain. "pos": recipient gets exact (preview UX in roadmap). */
   mode?: "tip" | "pos";
+  /** Optional Order id. When provided, Tab marks the order
+   *  `completed` server-side after Smart Pay lands and fires
+   *  `order.completed`. Use when paying a Tab-created order so the
+   *  merchant's dashboard / webhook fires even if the client-side
+   *  follow-up call fails. Critical for native-asset orders (ETH,
+   *  BNB, CELO, SOL) — the on-chain indexer only catches USDC
+   *  `PaymentRelayed` events, so without `orderId` a native order can
+   *  stay in `awaiting_payment` indefinitely. */
+  orderId?: string;
 };
 
 export type SmartPayResult =

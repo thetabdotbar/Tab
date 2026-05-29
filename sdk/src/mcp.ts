@@ -223,33 +223,37 @@ const MCP_TOOLS = [
   {
     name: "tab_pay_smart",
     description:
-      "Pay an amount of any supported asset (USDC/ETH/BNB/CELO) to a Tab handle. The server picks the cheapest source from the payer's full balance and executes gaslessly via their 7702 delegation. Examples: amount='5' recipientAsset='USDC' → alice gets 5 USDC on Base; amount='0.2' recipientAsset='BNB' → bob gets 0.2 BNB on BSC. Direct (same-asset, same-chain) is ~3s and zero fee; cross-asset/cross-chain via relay.link is ~20-30s and the bridge fee comes out of the recipient amount in tip mode. Requires gasless tipping enabled at thetab.bar/dashboard/tabbot.",
+      "Pay an amount of any supported asset (USDC/ETH/BNB/CELO/SOL) to a Tab handle or address on any chain (Base/BSC/Ink/Celo/Solana). The server picks the cheapest source from the payer's full balance and executes gaslessly via their 7702 delegation (EVM) or Subscriptions Delegation Program (Solana). When no single source covers the amount but the wallet's total does, Tab fans out N legs in parallel and returns kind:'multi'. Examples: amount='5' recipientAsset='USDC' → alice gets 5 USDC on Base; amount='0.2' recipientAsset='BNB' → bob gets 0.2 BNB on BSC; amount='0.1' recipientAsset='SOL' recipientChain='solana' → carol gets 0.1 SOL on Solana. Direct (same-asset, same-chain) is ~3s and zero fee; cross-asset/cross-chain via relay.link is ~20-30s. Requires gasless tipping enabled at thetab.bar/dashboard/tabbot.",
     inputSchema: {
       type: "object",
       properties: {
         amount: {
           type: "string",
-          description: "Amount in the recipient asset's natural units. '5' for 5 USDC, '0.2' for 0.2 BNB, '0.05' for 0.05 ETH.",
+          description: "Amount in the recipient asset's natural units. '5' for 5 USDC, '0.2' for 0.2 BNB, '0.05' for 0.05 ETH, '0.1' for 0.1 SOL.",
         },
         recipientAsset: {
           type: "string",
-          enum: ["USDC", "ETH", "BNB", "CELO"],
-          description: "Asset the recipient receives. Defaults to USDC.",
+          enum: ["USDC", "ETH", "BNB", "CELO", "SOL"],
+          description: "Asset the recipient receives. Defaults to USDC. SOL only valid when recipientChain is 'solana'.",
         },
-        recipient: { type: "string", description: "EVM 0x address OR Tab @handle." },
+        recipient: { type: "string", description: "EVM 0x address, Solana base58 address, OR Tab @handle." },
         recipientChain: {
           type: "string",
-          enum: ["base", "bsc", "ink", "celo"],
-          description: "Settle on this chain. Defaults sensibly per recipientAsset (base for USDC/ETH, bsc for BNB, celo for CELO).",
+          enum: ["base", "bsc", "ink", "celo", "solana"],
+          description: "Settle on this chain. Defaults sensibly per recipientAsset (base for USDC/ETH, bsc for BNB, celo for CELO, solana for SOL).",
         },
         slippageCap: {
           type: "number",
-          description: "Max acceptable slippage (0.01 = 1%). Default 0.01.",
+          description: "Max acceptable slippage (0.02 = 2%). Default 0.02 — covers typical relay.link bridge fee + DEX slippage on small cross-chain amounts.",
         },
         mode: {
           type: "string",
           enum: ["tip", "pos"],
           description: "'tip' (default) = sender pays exact, recipient gets less on cross-chain. 'pos' = recipient gets exact (preview UX in roadmap).",
+        },
+        orderId: {
+          type: "string",
+          description: "Optional Order id. When set, Tab marks the order completed server-side + fires order.completed after Smart Pay lands. Critical for native orders (ETH/BNB/CELO/SOL) — the on-chain indexer only catches USDC PaymentRelayed events.",
         },
       },
       required: ["amount", "recipient"],
@@ -465,16 +469,17 @@ export async function makeTabMcpServer(opts: {
             recipient: String(a.recipient),
             recipientAsset:
               a.recipientAsset
-                ? (String(a.recipientAsset) as "USDC" | "ETH" | "BNB" | "CELO")
+                ? (String(a.recipientAsset) as "USDC" | "ETH" | "BNB" | "CELO" | "SOL")
                 : undefined,
             recipientChain:
               a.recipientChain
-                ? (String(a.recipientChain) as "base" | "bsc" | "ink" | "celo")
+                ? (String(a.recipientChain) as "base" | "bsc" | "ink" | "celo" | "solana")
                 : undefined,
             slippageCap:
               typeof a.slippageCap === "number" ? a.slippageCap : undefined,
             mode:
               a.mode ? (String(a.mode) as "tip" | "pos") : undefined,
+            orderId: a.orderId ? String(a.orderId) : undefined,
           });
           break;
         case "tab_balances_total":
