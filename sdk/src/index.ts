@@ -1020,6 +1020,11 @@ export type SmartPayResult =
       kind: "relay";
       pullTxHash: string;
       sourceTxHash: string;
+      /** relay.link request id for polling `tab.bridge.status(requestId)`
+       *  until the destination chain credits the recipient. Always
+       *  present for the relay path; absent only when the planner
+       *  short-circuited to a same-chain finalize. */
+      requestId?: string;
       sourceChain: string;
       destinationChain: string;
       recipientAmount: string;
@@ -1032,6 +1037,38 @@ export type SmartPayResult =
       recipientAmountUsd: number;
       senderPaysUsd: number;
       feeUsd: number;
+    }
+  | {
+      /** Multi-source aggregation: the planner couldn't cover the
+       *  payment from any single source chain but the caller's TOTAL
+       *  balance does. Tab pulls from N chains in parallel and
+       *  delivers a combined result. `legs[]` carries per-leg outcomes
+       *  including partial failures — when `allOk` is false at least
+       *  one leg failed; the successful ones still delivered. Mode
+       *  is currently "tip" only (POS multi-source is non-trivial and
+       *  not yet wired). */
+      ok: true;
+      kind: "multi";
+      legs: Array<
+        | {
+            ok: true;
+            chain: string;
+            asset: string;
+            pullTxHash?: string;
+            sourceTxHash?: string;
+            requestId?: string;
+            recipientAmount: string;
+          }
+        | { ok: false; chain: string; asset: string; reason: string }
+      >;
+      allOk: boolean;
+      recipientAmount: string;
+      recipientAsset: SmartPayAsset;
+      recipientChain: string;
+      senderPaysUsd: number;
+      recipientAmountUsd: number;
+      feeUsd: number;
+      senderPaysSummary: string;
     };
 
 export class PayResource {
@@ -1171,7 +1208,15 @@ export class BridgeResource {
    *  sourceChain/sourceAsset/sourceAmount as the bridge / exact-input
    *  branch, distinct from the "I want recipient to get exactly X"
    *  flow. Recipient defaults to the special "self" sentinel, which
-   *  the server expands to the authenticated caller's address. */
+   *  the server expands to the authenticated caller's address.
+   *
+   *  SOL destination caveat: relay.link delivers wSOL on Solana via
+   *  the wSOL mint; for callers asking for `toAsset: "SOL"` we re-map
+   *  to USDC inside the planner so the recipient gets a usable USDC
+   *  balance instead of wrapped SOL they then have to unwrap manually.
+   *  For native SOL delivery, use `tab.solana.topUp({amountSol})` —
+   *  that endpoint quotes relay with the wSOL mint AND tracks the
+   *  unwrap so the recipient lands with native lamports. */
   private body(p: BridgeParams) {
     return {
       sourceChain: p.fromChain,

@@ -64,15 +64,21 @@ Requires the payer wallet to have [gasless tipping enabled](https://thetab.bar/d
 
 - **Same-chain payment** (recipient's chain matches what you hold): **zero fee**. Sender and recipient see the same amount.
 - **Cross-chain payment**: the bridge / swap fee comes from relay.link (~$0.05-0.10 flat on USDC↔USDC bridges, 0.5-2% on asset swaps).
-  - **`mode: "tip"`** (default): sender pays exactly `amountUsd`. Recipient receives `amountUsd - feeUsd`. Same model Cashapp/Venmo use for international transfers. The receipt shows the breakdown.
-  - **`mode: "pos"`** (for bills / merchant POS where recipient must receive an exact amount): sender pays `amountUsd + feeUsd`. Pre-confirm preview UX is on the roadmap — for now agents should sum `senderPaysUsd` and verify before calling.
+  - **`mode: "tip"`** (default): sender pays exactly `amount`. Recipient receives `amount - feeAmount`. Same model Cashapp/Venmo use for international transfers. The receipt shows the breakdown.
+  - **`mode: "pos"`** (for bills / merchant POS where recipient must receive an exact amount): sender pays `amount + feeAmount`. Pre-confirm preview UX is on the roadmap — for now agents should sum `senderPaysUsd` and verify before calling.
+
+When no single source chain covers the payment but the caller's total balance does, Smart Pay returns `kind: "multi"` and executes legs in parallel across chains. The response includes a `legs[]` breakdown with per-leg tx hashes so partial successes are clear. Default `slippageCap` is **0.02 (2%)** — covers typical relay fees + DEX slippage on small cross-chain amounts.
 
 ```ts
-// "Tip mode" — default. Sender pays $10. Alice gets ~$9.94 cross-chain.
-await tab.pay.smart({ amountUsd: "10.00", recipient: "@alice" });
+// "Tip mode" — default. Sender pays 10 USDC. Alice gets ~9.94 cross-chain.
+await tab.pay.smart({ amount: "10", recipient: "@alice" });
 
-// "POS mode" — alice must receive exactly $10. Sender pays $10.06.
-await tab.pay.smart({ amountUsd: "10.00", recipient: "@alice", mode: "pos" });
+// "POS mode" — alice must receive exactly 10 USDC. Sender pays 10.06.
+await tab.pay.smart({ amount: "10", recipient: "@alice", mode: "pos" });
+
+// Native or SOL: pass recipientAsset + recipientChain.
+await tab.pay.smart({ amount: "0.2", recipient: "@bob", recipientAsset: "BNB", recipientChain: "bsc" });
+await tab.pay.smart({ amount: "0.1", recipient: "@carol", recipientAsset: "SOL", recipientChain: "solana" });
 ```
 
 ## Bridge (any asset → any asset)
@@ -100,7 +106,7 @@ const result = await tab.bridge.execute({
 });
 
 // Poll relay.link for destination fill
-if (result.kind === "relay" && result.requestId) {
+if (result.ok && result.kind === "relay" && result.requestId) {
   while (true) {
     const s = await tab.bridge.status(result.requestId);
     if (s.state === "filled") break;
@@ -112,7 +118,7 @@ if (result.kind === "relay" && result.requestId) {
 
 Same-chain swaps (e.g. ETH → USDC on Base), cross-chain bridges (USDC on Base → USDC on BSC), and cross-asset cross-chain (ETH on Base → BNB on BSC) all go through the same call. Source and destination can be EVM (Base/BSC/Ink/Celo) **or Solana** — Solana sources use the user's Subscriptions Delegation Program approval for USDC + wSOL.
 
-For users who land on Tab with only EVM USDC and need SOL for the Solana Smart Pay onboarding tx, `tab.solana.topUp({ amountSol: "0.07" })` pulls USDC via the user's 7702 delegation and bridges native SOL to their Solana wallet through relay.link.
+**Native SOL destination**: `tab.bridge.execute({ toAsset: "SOL", toChain: "solana", ... })` re-maps to USDC under the hood (relay.link delivers wSOL otherwise, which the recipient would have to unwrap manually). For native SOL delivery use `tab.solana.topUp({ amountSol: "0.07" })` instead — it quotes relay with the wSOL mint and lands native lamports on the caller's Solana wallet.
 
 ### Aggregate balance + spot prices
 
