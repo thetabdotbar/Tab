@@ -6,7 +6,12 @@
   "homepage": "https://thetab.bar/docs/agents/base-mcp",
   "type": "module",
   "main": "dist/index.js",
+  "module": "dist/index.js",
   "types": "dist/index.d.ts",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "author": "Tab (https://thetab.bar)",
   "repository": {
     "type": "git",
@@ -28,7 +33,8 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "build": "tsc",
